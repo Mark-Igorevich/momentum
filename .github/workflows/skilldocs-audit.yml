@@ -1,4 +1,4 @@
-name: SKILLDOCS curl-routed browser probe
+name: SKILLDOCS audit smoke matrix
 
 on:
   pull_request:
@@ -11,29 +11,72 @@ permissions:
   contents: read
 
 jobs:
-  probe:
+  smoke:
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        attempt: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
     steps:
       - name: Checkout audit branch
         uses: actions/checkout@v4
+
+      - name: Probe SKILLDOCS reachability
+        id: probe
+        shell: pwsh
+        run: |
+          $probeFile = Join-Path $env:RUNNER_TEMP "skilldocs-probe.html"
+          $codeFile = Join-Path $env:RUNNER_TEMP "skilldocs-code.txt"
+          curl.exe -4 -sS -L --http1.1 --connect-timeout 10 --max-time 25 `
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" `
+            -o $probeFile -w "%{http_code}" https://skilldocs.pl/ | Out-File -FilePath $codeFile -Encoding ascii
+          $curlExit = $LASTEXITCODE
+          $code = if (Test-Path $codeFile) { (Get-Content $codeFile -Raw).Trim() } else { "" }
+          $size = if (Test-Path $probeFile) { (Get-Item $probeFile).Length } else { 0 }
+          $reachable = ($curlExit -eq 0 -and $code -eq "200" -and $size -gt 100000)
+          "reachable=$($reachable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "attempt=${{ matrix.attempt }} reachable=$reachable curlExit=$curlExit http=$code bytes=$size"
+
       - name: Set up Node.js
+        if: steps.probe.outputs.reachable == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
       - name: Install Playwright
+        if: steps.probe.outputs.reachable == 'true'
         shell: pwsh
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install chromium
-      - name: Run curl-routed browser probe
+
+      - name: Run smoke audit
+        if: steps.probe.outputs.reachable == 'true'
         shell: pwsh
-        run: node skilldocs-audit/probe-curl.mjs
-      - name: Upload probe screenshot
-        if: always()
+        env:
+          BASE_URL: https://skilldocs.pl/
+          SUBMIT_FORMS: 'false'
+          TEST_PHONE: '+48570804478'
+          TEST_EMAIL: contact@skilldocs.pl
+          MAX_URLS: '5'
+          MAX_FORM_SUBMISSIONS: '0'
+          PAGE_TIMEOUT_MS: '45000'
+          ACTION_TIMEOUT_MS: '9000'
+          AUDIT_ID: SD-AUDIT-SMOKE-20260731
+        run: node skilldocs-audit/audit.mjs
+
+      - name: Upload smoke report
+        if: steps.probe.outputs.reachable == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: skilldocs-curl-route-probe-20260731
-          path: probe-curl-route.png
+          name: skilldocs-audit-smoke-attempt-${{ matrix.attempt }}
+          path: skilldocs-audit/output
           retention-days: 7
           if-no-files-found: warn
+
+      - name: Stop remaining matrix attempts after reachable run
+        if: steps.probe.outputs.reachable == 'true' && always()
+        shell: pwsh
+        run: exit 1
