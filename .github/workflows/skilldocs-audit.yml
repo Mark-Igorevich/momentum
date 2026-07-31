@@ -1,4 +1,4 @@
-name: SKILLDOCS full-site audit
+name: SKILLDOCS connectivity probe
 
 on:
   pull_request:
@@ -11,42 +11,49 @@ permissions:
   contents: read
 
 jobs:
-  audit:
-    runs-on: ubuntu-latest
-    timeout-minutes: 330
+  probe-unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
-      - name: Checkout audit branch
-        uses: actions/checkout@v4
+      - name: DNS and HTTPS probe
+        shell: bash
+        run: |
+          set +e
+          echo "OS=$RUNNER_OS"
+          date -u
+          python3 - <<'PY'
+          import socket
+          print('getaddrinfo:', socket.getaddrinfo('skilldocs.pl', 443, type=socket.SOCK_STREAM))
+          PY
+          echo '--- curl HTTPS IPv4 HTTP/1.1'
+          curl -4 -v --http1.1 --connect-timeout 15 --max-time 45 -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36' -o /tmp/skilldocs.html -D /tmp/skilldocs.headers https://skilldocs.pl/
+          code=$?
+          echo "curl_code=$code"
+          cat /tmp/skilldocs.headers 2>/dev/null || true
+          wc -c /tmp/skilldocs.html 2>/dev/null || true
+          head -c 300 /tmp/skilldocs.html 2>/dev/null || true
+          echo
+          echo '--- curl HTTP'
+          curl -4 -v --connect-timeout 15 --max-time 30 -o /tmp/skilldocs-http.html -D /tmp/skilldocs-http.headers http://skilldocs.pl/
+          echo "http_curl_code=$?"
+          cat /tmp/skilldocs-http.headers 2>/dev/null || true
+          exit 0
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Playwright
-        run: npm install --no-save playwright@1.55.0
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Run public-site audit
-        env:
-          BASE_URL: https://skilldocs.pl/
-          SUBMIT_FORMS: 'true'
-          TEST_PHONE: '+48570804478'
-          TEST_EMAIL: contact@skilldocs.pl
-          MAX_URLS: '750'
-          MAX_FORM_SUBMISSIONS: '80'
-          PAGE_TIMEOUT_MS: '30000'
-          ACTION_TIMEOUT_MS: '7000'
-          AUDIT_ID: SD-AUDIT-20260731
-        run: node skilldocs-audit/audit.mjs
-
-      - name: Upload audit report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: skilldocs-full-audit-20260731
-          path: skilldocs-audit/output
-          retention-days: 7
-          if-no-files-found: warn
+  probe-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: DNS and HTTPS probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Resolve-DnsName skilldocs.pl | Format-Table -AutoSize
+          curl.exe -4 -v --http1.1 --connect-timeout 15 --max-time 45 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36" -o "$env:RUNNER_TEMP\skilldocs.html" -D "$env:RUNNER_TEMP\skilldocs.headers" https://skilldocs.pl/
+          Write-Host "curl_code=$LASTEXITCODE"
+          if (Test-Path "$env:RUNNER_TEMP\skilldocs.headers") { Get-Content "$env:RUNNER_TEMP\skilldocs.headers" }
+          if (Test-Path "$env:RUNNER_TEMP\skilldocs.html") { (Get-Item "$env:RUNNER_TEMP\skilldocs.html").Length }
+          exit 0
