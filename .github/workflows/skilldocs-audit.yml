@@ -1,4 +1,4 @@
-name: SKILLDOCS patched audit smoke matrix
+name: SKILLDOCS full-site audit matrix
 
 on:
   pull_request:
@@ -11,14 +11,14 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
+  full-audit:
     strategy:
       fail-fast: true
       max-parallel: 1
       matrix:
         attempt: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     runs-on: windows-latest
-    timeout-minutes: 55
+    timeout-minutes: 330
     steps:
       - name: Checkout audit branch
         uses: actions/checkout@v4
@@ -65,7 +65,7 @@ jobs:
           node skilldocs-audit/runtime-patch.mjs skilldocs-audit/audit.mjs skilldocs-audit/audit-runtime.mjs
           node --check skilldocs-audit/audit-runtime.mjs
 
-      - name: Run smoke audit
+      - name: Run full public-site audit
         if: steps.probe.outputs.reachable == 'true'
         shell: pwsh
         env:
@@ -73,21 +73,22 @@ jobs:
           SUBMIT_FORMS: 'false'
           TEST_PHONE: '+48570804478'
           TEST_EMAIL: contact@skilldocs.pl
-          MAX_URLS: '5'
+          MAX_URLS: '750'
           MAX_FORM_SUBMISSIONS: '0'
-          PAGE_TIMEOUT_MS: '45000'
+          PAGE_TIMEOUT_MS: '60000'
           ACTION_TIMEOUT_MS: '9000'
-          AUDIT_ID: SD-AUDIT-PATCHED-SMOKE-20260731
+          AUDIT_ID: SD-FULL-AUDIT-20260731
         run: node skilldocs-audit/audit-runtime.mjs
 
-      - name: Upload smoke report
+      - name: Upload full audit report
         if: steps.probe.outputs.reachable == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: skilldocs-patched-smoke-attempt-${{ matrix.attempt }}
+          name: skilldocs-full-audit-attempt-${{ matrix.attempt }}
           path: skilldocs-audit/output
           retention-days: 7
           if-no-files-found: warn
+          compression-level: 6
 
       - name: Stop remaining matrix attempts after reachable run
         if: steps.probe.outputs.reachable == 'true' && always()
