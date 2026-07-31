@@ -1,0 +1,79 @@
+name: SKILLDOCS compact audit export
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/skilldocs-audit.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  compact-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download completed full audit artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: '8786399677'
+        run: |
+          set -euo pipefail
+          curl --fail --location \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            --output full-audit.zip
+          ls -lh full-audit.zip
+
+      - name: Extract only reports and tables
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wanted = {
+              'summary.json',
+              'audit.json',
+              'pages.csv',
+              'buttons.csv',
+              'forms.csv',
+              'links.csv',
+              'report.html',
+              'README.md',
+          }
+          out = Path('compact-audit')
+          out.mkdir(parents=True, exist_ok=True)
+          with ZipFile('full-audit.zip') as archive:
+              selected = []
+              for info in archive.infolist():
+                  name = Path(info.filename).name
+                  if name in wanted and not info.is_dir():
+                      target = out / name
+                      with archive.open(info) as src, target.open('wb') as dst:
+                          while True:
+                              chunk = src.read(1024 * 1024)
+                              if not chunk:
+                                  break
+                              dst.write(chunk)
+                      selected.append((info.filename, target.stat().st_size))
+          if not selected:
+              raise SystemExit('No compact audit files found in artifact')
+          for name, size in selected:
+              print(f'{name}: {size} bytes')
+          PY
+          du -sh compact-audit
+          ls -lh compact-audit
+
+      - name: Upload compact audit package
+        uses: actions/upload-artifact@v4
+        with:
+          name: skilldocs-compact-audit-20260731
+          path: compact-audit
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 9
