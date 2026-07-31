@@ -1,4 +1,4 @@
-name: SKILLDOCS full-site audit matrix
+name: SKILLDOCS sitemap inventory matrix
 
 on:
   pull_request:
@@ -11,14 +11,14 @@ permissions:
   contents: read
 
 jobs:
-  full-audit:
+  inventory:
     strategy:
       fail-fast: true
       max-parallel: 1
       matrix:
-        attempt: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        attempt: [1, 2, 3, 4, 5, 6, 7, 8]
     runs-on: windows-latest
-    timeout-minutes: 330
+    timeout-minutes: 25
     steps:
       - name: Checkout audit branch
         uses: actions/checkout@v4
@@ -31,10 +31,9 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $probeFile = Join-Path $env:RUNNER_TEMP "skilldocs-probe.html"
           $codeFile = Join-Path $env:RUNNER_TEMP "skilldocs-code.txt"
-          $errorFile = Join-Path $env:RUNNER_TEMP "skilldocs-curl-error.txt"
           curl.exe -4 -sS -L --http1.1 --connect-timeout 10 --max-time 25 `
             -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" `
-            -o $probeFile -w "%{http_code}" https://skilldocs.pl/ 2> $errorFile | Out-File -FilePath $codeFile -Encoding ascii
+            -o $probeFile -w "%{http_code}" https://skilldocs.pl/ | Out-File -FilePath $codeFile -Encoding ascii
           $curlExit = $LASTEXITCODE
           $global:LASTEXITCODE = 0
           $code = if (Test-Path $codeFile) { (Get-Content $codeFile -Raw).Trim() } else { "" }
@@ -42,55 +41,99 @@ jobs:
           $reachable = ($curlExit -eq 0 -and $code -eq "200" -and $size -gt 100000)
           "reachable=$($reachable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "attempt=${{ matrix.attempt }} reachable=$reachable curlExit=$curlExit http=$code bytes=$size"
-          if (Test-Path $errorFile) { Get-Content $errorFile | Select-Object -First 5 }
           exit 0
 
-      - name: Set up Node.js
-        if: steps.probe.outputs.reachable == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Playwright
+      - name: Build sitemap inventory
         if: steps.probe.outputs.reachable == 'true'
         shell: pwsh
         run: |
-          npm install --no-save playwright@1.55.0
-          npx playwright install chromium
+          New-Item -ItemType Directory -Path skilldocs-inventory -Force | Out-Null
+          @'
+          import csv, json, os, re, subprocess, xml.etree.ElementTree as ET
+          from urllib.parse import urljoin, urlparse, urlunparse
 
-      - name: Build patched audit runtime
-        if: steps.probe.outputs.reachable == 'true'
-        shell: pwsh
-        run: |
-          node skilldocs-audit/runtime-patch.mjs skilldocs-audit/audit.mjs skilldocs-audit/audit-runtime.mjs
-          node --check skilldocs-audit/audit-runtime.mjs
+          BASE = 'https://skilldocs.pl/'
+          OUT = 'skilldocs-inventory'
+          UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36'
+          candidates = [urljoin(BASE, 'sitemap_index.xml'), urljoin(BASE, 'sitemap.xml'), urljoin(BASE, 'wp-sitemap.xml')]
+          non_user = re.compile(r'(attachment|author|category|post_tag|elementor_library|cost-calc|product_cat|product_tag|portfolio-category|nav_menu|e-landing-page)[^/]*-sitemap', re.I)
+          assets = re.compile(r'\.(?:avif|bmp|css|csv|docx?|eot|gif|ico|jpe?g|js|json|map|mp3|mp4|mpeg|ogg|otf|pdf|png|pptx?|rar|rss|svg|tar|tiff?|ttf|txt|wav|webm|webp|woff2?|xlsx?|xml|zip)$', re.I)
+          excluded = re.compile(r'/(?:wp-admin|wp-login\.php|wp-json|wp-content|wp-includes|feed|comments|author|tag|category|elementor_library|cost-calc-templates)(?:/|$)', re.I)
 
-      - name: Run full public-site audit
-        if: steps.probe.outputs.reachable == 'true'
-        shell: pwsh
-        env:
-          BASE_URL: https://skilldocs.pl/
-          SUBMIT_FORMS: 'false'
-          TEST_PHONE: '+48570804478'
-          TEST_EMAIL: contact@skilldocs.pl
-          MAX_URLS: '750'
-          MAX_FORM_SUBMISSIONS: '0'
-          PAGE_TIMEOUT_MS: '60000'
-          ACTION_TIMEOUT_MS: '9000'
-          AUDIT_ID: SD-FULL-AUDIT-20260731
-        run: node skilldocs-audit/audit-runtime.mjs
+          def fetch(url):
+              p = subprocess.run(['curl.exe','-4','-sS','-L','--http1.1','--connect-timeout','15','--max-time','45','-A',UA,url], capture_output=True)
+              if p.returncode != 0:
+                  raise RuntimeError(p.stderr.decode('utf-8','replace')[:500])
+              return p.stdout
 
-      - name: Upload full audit report
+          def local_name(tag):
+              return tag.rsplit('}', 1)[-1]
+
+          def normalize(raw):
+              try:
+                  u = urlparse(urljoin(BASE, raw))
+              except Exception:
+                  return None
+              if u.scheme not in ('http','https') or u.hostname.replace('www.','') != 'skilldocs.pl':
+                  return None
+              path = re.sub(r'/+', '/', u.path or '/')
+              if assets.search(path) or excluded.search(path):
+                  return None
+              if not path.endswith('/') and not re.search(r'\.[a-z0-9]{1,8}$', path, re.I):
+                  path += '/'
+              return urlunparse(('https','skilldocs.pl',path,'','',''))
+
+          queue = list(dict.fromkeys(candidates))
+          seen_maps = set()
+          docs = []
+          urls = {}
+          while queue:
+              sm = queue.pop(0)
+              if sm in seen_maps or len(seen_maps) > 100:
+                  continue
+              seen_maps.add(sm)
+              try:
+                  data = fetch(sm)
+                  root = ET.fromstring(data)
+                  root_name = local_name(root.tag)
+                  locs = [(el.text or '').strip() for el in root.iter() if local_name(el.tag) == 'loc' and (el.text or '').strip()]
+                  docs.append({'url': sm, 'ok': True, 'root': root_name, 'locs': len(locs)})
+                  if root_name == 'sitemapindex':
+                      for loc in locs:
+                          p = urlparse(loc)
+                          if p.hostname and p.hostname.replace('www.','') == 'skilldocs.pl' and not non_user.search(p.path):
+                              queue.append(loc)
+                  elif root_name == 'urlset':
+                      for loc in locs:
+                          n = normalize(loc)
+                          if n and n not in urls:
+                              urls[n] = sm
+              except Exception as e:
+                  docs.append({'url': sm, 'ok': False, 'error': f'{type(e).__name__}: {e}'})
+
+          items = [{'url': u, 'source_sitemap': s, 'language': ('uk' if urlparse(u).path.startswith('/uk/') else 'en' if urlparse(u).path.startswith('/en/') else 'pl' if urlparse(u).path.startswith('/pl/') else 'ru')} for u,s in urls.items()]
+          items.sort(key=lambda x: x['url'])
+          os.makedirs(OUT, exist_ok=True)
+          with open(os.path.join(OUT,'urls.csv'),'w',newline='',encoding='utf-8-sig') as f:
+              w=csv.DictWriter(f,fieldnames=['url','language','source_sitemap']); w.writeheader(); w.writerows(items)
+          summary={'base':BASE,'sitemap_documents':docs,'url_count':len(items),'language_counts':{lang:sum(1 for x in items if x['language']==lang) for lang in ['ru','uk','en','pl']}}
+          with open(os.path.join(OUT,'inventory.json'),'w',encoding='utf-8') as f: json.dump({'summary':summary,'urls':items},f,ensure_ascii=False,indent=2)
+          with open(os.path.join(OUT,'summary.txt'),'w',encoding='utf-8') as f:
+              f.write(json.dumps(summary,ensure_ascii=False,indent=2))
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          '@ | Set-Content -Path $env:RUNNER_TEMP\inventory.py -Encoding utf8
+          python $env:RUNNER_TEMP\inventory.py
+
+      - name: Upload sitemap inventory
         if: steps.probe.outputs.reachable == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: skilldocs-full-audit-attempt-${{ matrix.attempt }}
-          path: skilldocs-audit/output
+          name: skilldocs-sitemap-inventory-attempt-${{ matrix.attempt }}
+          path: skilldocs-inventory
           retention-days: 7
           if-no-files-found: warn
-          compression-level: 6
 
-      - name: Stop remaining matrix attempts after reachable run
+      - name: Stop remaining attempts after reachable run
         if: steps.probe.outputs.reachable == 'true' && always()
         shell: pwsh
         run: exit 1
