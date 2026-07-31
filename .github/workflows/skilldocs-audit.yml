@@ -1,4 +1,4 @@
-name: SKILLDOCS full-site browser audit
+name: SKILLDOCS all-buttons and popup audit
 
 on:
   pull_request:
@@ -9,9 +9,30 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
-  full-audit:
+  cancel-unsafe-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel previous run that allowed form submissions
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const unsafeRunId = 30607303234;
+            try {
+              await github.rest.actions.cancelWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: unsafeRunId,
+              });
+              core.info(`Cancellation requested for unsafe run ${unsafeRunId}`);
+            } catch (error) {
+              core.info(`Unsafe run ${unsafeRunId} is already stopped or cannot be cancelled: ${error.message}`);
+            }
+
+  popup-audit:
+    needs: cancel-unsafe-run
     strategy:
       fail-fast: true
       max-parallel: 1
@@ -63,28 +84,25 @@ jobs:
           node skilldocs-audit/runtime-patch.mjs skilldocs-audit/audit.mjs skilldocs-audit/audit-runtime.mjs
           node --check skilldocs-audit/audit-runtime.mjs
 
-      - name: Run complete desktop and mobile audit with unique test submissions
+      - name: Check every visible button and popup without submitting forms
         if: steps.probe.outputs.reachable == 'true'
         shell: pwsh
         env:
           BASE_URL: https://skilldocs.pl/
           OUTPUT_DIR: skilldocs-audit/output
-          SUBMIT_FORMS: 'true'
-          TEST_PHONE: '+48570804478'
-          TEST_EMAIL: contact@skilldocs.pl
+          SUBMIT_FORMS: 'false'
+          MAX_FORM_SUBMISSIONS: '0'
           MAX_URLS: '750'
-          MAX_FORM_SUBMISSIONS: '100'
           PAGE_TIMEOUT_MS: '45000'
           ACTION_TIMEOUT_MS: '7000'
-          CURL_CONCURRENCY: '10'
-          AUDIT_ID: SD-FULL-SITE-AUDIT-20260731
+          AUDIT_ID: SD-ALL-BUTTONS-POPUPS-20260731
         run: node skilldocs-audit/audit-runtime.mjs
 
-      - name: Upload full audit result
+      - name: Upload popup audit result
         if: steps.probe.outputs.reachable == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: skilldocs-full-site-audit-attempt-${{ matrix.attempt }}
+          name: skilldocs-all-buttons-popups-attempt-${{ matrix.attempt }}
           path: skilldocs-audit/output
           retention-days: 7
           if-no-files-found: warn
