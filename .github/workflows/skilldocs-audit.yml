@@ -27,17 +27,23 @@ jobs:
         id: probe
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
           $probeFile = Join-Path $env:RUNNER_TEMP "skilldocs-probe.html"
           $codeFile = Join-Path $env:RUNNER_TEMP "skilldocs-code.txt"
+          $errorFile = Join-Path $env:RUNNER_TEMP "skilldocs-curl-error.txt"
           curl.exe -4 -sS -L --http1.1 --connect-timeout 10 --max-time 25 `
             -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" `
-            -o $probeFile -w "%{http_code}" https://skilldocs.pl/ | Out-File -FilePath $codeFile -Encoding ascii
+            -o $probeFile -w "%{http_code}" https://skilldocs.pl/ 2> $errorFile | Out-File -FilePath $codeFile -Encoding ascii
           $curlExit = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
           $code = if (Test-Path $codeFile) { (Get-Content $codeFile -Raw).Trim() } else { "" }
           $size = if (Test-Path $probeFile) { (Get-Item $probeFile).Length } else { 0 }
           $reachable = ($curlExit -eq 0 -and $code -eq "200" -and $size -gt 100000)
           "reachable=$($reachable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "attempt=${{ matrix.attempt }} reachable=$reachable curlExit=$curlExit http=$code bytes=$size"
+          if (Test-Path $errorFile) { Get-Content $errorFile | Select-Object -First 5 }
+          exit 0
 
       - name: Set up Node.js
         if: steps.probe.outputs.reachable == 'true'
