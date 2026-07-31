@@ -1,113 +1,79 @@
-name: SKILLDOCS all-buttons and popup audit
+name: SKILLDOCS compact audit export
 
 on:
   pull_request:
     branches: [main]
     paths:
-      - 'skilldocs-audit/**'
       - '.github/workflows/skilldocs-audit.yml'
 
 permissions:
   contents: read
-  actions: write
+  actions: read
 
 jobs:
-  cancel-unsafe-run:
+  compact-export:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - name: Cancel previous run that allowed form submissions
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const unsafeRunId = 30607303234;
-            try {
-              await github.rest.actions.cancelWorkflowRun({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: unsafeRunId,
-              });
-              core.info(`Cancellation requested for unsafe run ${unsafeRunId}`);
-            } catch (error) {
-              core.info(`Unsafe run ${unsafeRunId} is already stopped or cannot be cancelled: ${error.message}`);
-            }
-
-  popup-audit:
-    needs: cancel-unsafe-run
-    strategy:
-      fail-fast: true
-      max-parallel: 1
-      matrix:
-        attempt: [1, 2, 3, 4]
-    runs-on: windows-latest
-    timeout-minutes: 180
-    steps:
-      - name: Checkout audit branch
-        uses: actions/checkout@v4
-
-      - name: Probe SKILLDOCS reachability
-        id: probe
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Continue'
-          $PSNativeCommandUseErrorActionPreference = $false
-          $probeFile = Join-Path $env:RUNNER_TEMP "skilldocs-probe.html"
-          $codeFile = Join-Path $env:RUNNER_TEMP "skilldocs-code.txt"
-          curl.exe -4 -sS -L --http1.1 --connect-timeout 10 --max-time 25 `
-            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" `
-            -o $probeFile -w "%{http_code}" https://skilldocs.pl/ | Out-File -FilePath $codeFile -Encoding ascii
-          $curlExit = $LASTEXITCODE
-          $global:LASTEXITCODE = 0
-          $code = if (Test-Path $codeFile) { (Get-Content $codeFile -Raw).Trim() } else { "" }
-          $size = if (Test-Path $probeFile) { (Get-Item $probeFile).Length } else { 0 }
-          $reachable = ($curlExit -eq 0 -and $code -eq "200" -and $size -gt 100000)
-          "reachable=$($reachable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "attempt=${{ matrix.attempt }} reachable=$reachable curlExit=$curlExit http=$code bytes=$size"
-          exit 0
-
-      - name: Set up Node.js
-        if: steps.probe.outputs.reachable == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Playwright
-        if: steps.probe.outputs.reachable == 'true'
-        shell: pwsh
-        run: |
-          npm install --no-save playwright@1.55.0
-          npx playwright install chromium
-
-      - name: Build patched audit runtime
-        if: steps.probe.outputs.reachable == 'true'
-        shell: pwsh
-        run: |
-          node skilldocs-audit/runtime-patch.mjs skilldocs-audit/audit.mjs skilldocs-audit/audit-runtime.mjs
-          node --check skilldocs-audit/audit-runtime.mjs
-
-      - name: Check every visible button and popup without submitting forms
-        if: steps.probe.outputs.reachable == 'true'
-        shell: pwsh
+      - name: Download completed full audit artifact
         env:
-          BASE_URL: https://skilldocs.pl/
-          OUTPUT_DIR: skilldocs-audit/output
-          SUBMIT_FORMS: 'false'
-          MAX_FORM_SUBMISSIONS: '0'
-          MAX_URLS: '750'
-          PAGE_TIMEOUT_MS: '45000'
-          ACTION_TIMEOUT_MS: '7000'
-          AUDIT_ID: SD-ALL-BUTTONS-POPUPS-20260731
-        run: node skilldocs-audit/audit-runtime.mjs
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: '8786399677'
+        run: |
+          set -euo pipefail
+          curl --fail --location \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            --output full-audit.zip
+          ls -lh full-audit.zip
 
-      - name: Upload popup audit result
-        if: steps.probe.outputs.reachable == 'true' && always()
+      - name: Extract only reports and tables
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wanted = {
+              'summary.json',
+              'audit.json',
+              'pages.csv',
+              'buttons.csv',
+              'forms.csv',
+              'links.csv',
+              'report.html',
+              'README.md',
+          }
+          out = Path('compact-audit')
+          out.mkdir(parents=True, exist_ok=True)
+          with ZipFile('full-audit.zip') as archive:
+              selected = []
+              for info in archive.infolist():
+                  name = Path(info.filename).name
+                  if name in wanted and not info.is_dir():
+                      target = out / name
+                      with archive.open(info) as src, target.open('wb') as dst:
+                          while True:
+                              chunk = src.read(1024 * 1024)
+                              if not chunk:
+                                  break
+                              dst.write(chunk)
+                      selected.append((info.filename, target.stat().st_size))
+          if not selected:
+              raise SystemExit('No compact audit files found in artifact')
+          for name, size in selected:
+              print(f'{name}: {size} bytes')
+          PY
+          du -sh compact-audit
+          ls -lh compact-audit
+
+      - name: Upload compact audit package
         uses: actions/upload-artifact@v4
         with:
-          name: skilldocs-all-buttons-popups-attempt-${{ matrix.attempt }}
-          path: skilldocs-audit/output
+          name: skilldocs-compact-audit-20260731
+          path: compact-audit
           retention-days: 7
-          if-no-files-found: warn
-
-      - name: Stop remaining attempts after reachable run
-        if: steps.probe.outputs.reachable == 'true' && always()
-        shell: pwsh
-        run: exit 1
+          if-no-files-found: error
+          compression-level: 9
