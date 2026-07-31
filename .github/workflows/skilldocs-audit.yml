@@ -1,4 +1,4 @@
-name: SKILLDOCS audit smoke test
+name: SKILLDOCS browser transport probe
 
 on:
   pull_request:
@@ -11,43 +11,29 @@ permissions:
   contents: read
 
 jobs:
-  audit-smoke:
+  probe:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
     steps:
       - name: Checkout audit branch
         uses: actions/checkout@v4
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install Playwright
         shell: pwsh
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install chromium
-
-      - name: Run smoke audit
+      - name: Run browser transport probe
         shell: pwsh
-        env:
-          BASE_URL: https://skilldocs.pl/
-          SUBMIT_FORMS: 'false'
-          TEST_PHONE: '+48570804478'
-          TEST_EMAIL: contact@skilldocs.pl
-          MAX_URLS: '5'
-          MAX_FORM_SUBMISSIONS: '0'
-          PAGE_TIMEOUT_MS: '45000'
-          ACTION_TIMEOUT_MS: '9000'
-          AUDIT_ID: SD-AUDIT-SMOKE-20260731
-        run: node skilldocs-audit/audit.mjs
-
-      - name: Upload smoke report
+        run: node skilldocs-audit/probe.mjs
+      - name: Upload probe screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: skilldocs-audit-smoke-20260731
-          path: skilldocs-audit/output
+          name: skilldocs-browser-probe-20260731
+          path: probe-*.png
           retention-days: 7
           if-no-files-found: warn
