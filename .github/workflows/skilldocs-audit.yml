@@ -1,0 +1,52 @@
+name: SKILLDOCS full-site audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'skilldocs-audit/**'
+      - '.github/workflows/skilldocs-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Checkout audit branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: npm install --no-save playwright@1.55.0
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run public-site audit
+        env:
+          BASE_URL: https://skilldocs.pl/
+          SUBMIT_FORMS: 'true'
+          TEST_PHONE: '+48570804478'
+          TEST_EMAIL: contact@skilldocs.pl
+          MAX_URLS: '750'
+          MAX_FORM_SUBMISSIONS: '80'
+          PAGE_TIMEOUT_MS: '30000'
+          ACTION_TIMEOUT_MS: '7000'
+          AUDIT_ID: SD-AUDIT-20260731
+        run: node skilldocs-audit/audit.mjs
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skilldocs-full-audit-20260731
+          path: skilldocs-audit/output
+          retention-days: 7
+          if-no-files-found: warn
