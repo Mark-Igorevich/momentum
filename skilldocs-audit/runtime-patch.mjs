@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 const sourcePath = process.argv[2] || 'skilldocs-audit/audit.mjs';
 const outputPath = process.argv[3] || 'skilldocs-audit/audit-runtime.mjs';
 let source = await fs.readFile(sourcePath, 'utf8');
+source = source.replace(/\r\n/g, '\n');
 
 function replaceRequired(label, search, replacement) {
   if (!source.includes(search)) {
@@ -27,7 +28,7 @@ replaceRequired(
 const oldCandidateFunction = `function candidateShouldBeInteractionTested(candidate) {
   if (!candidate.visible || candidate.disabled) return false;
   if (candidate.tag === 'input' && ['submit', 'reset'].includes(candidate.type)) return false;
-  if (candidate.formId || /\\b(form|wpcf7|wpforms)\\b/i.test(candidate.formClass)) {
+  if (candidate.formId || /\b(form|wpcf7|wpforms)\b/i.test(candidate.formClass)) {
     if (candidate.type === 'submit' || /submit|send|отправ|wys|надісл/i.test(candidate.text)) return false;
   }
   if (/cookie|consent|cky-|cmplz|complianz/i.test(\`${'${candidate.classes} ${candidate.id}'}\`)) return false;
@@ -40,7 +41,7 @@ const oldCandidateFunction = `function candidateShouldBeInteractionTested(candid
 const newCandidateFunction = `function candidateShouldBeInteractionTested(candidate) {
   if (!candidate.visible || candidate.disabled) return false;
   if (candidate.tag === 'input' && ['submit', 'reset'].includes(candidate.type)) return false;
-  if (candidate.formId || /\\b(form|wpcf7|wpforms)\\b/i.test(candidate.formClass)) {
+  if (candidate.formId || /\b(form|wpcf7|wpforms)\b/i.test(candidate.formClass)) {
     if (candidate.type === 'submit' || /submit|send|отправ|wys|надісл/i.test(candidate.text)) return false;
   }
   const identity = \`${'${candidate.classes} ${candidate.id}'}\`;
@@ -79,7 +80,7 @@ const newFormSignature = `function formSignature(form, pageLanguage, popupId = '
     .filter((f) => !/honeypot|website|url|captcha/i.test(f.name))
     .map((f) => \`${'${f.tag}:${f.type}:${f.name}:${f.required ? 1 : 0}'}\`)
     .sort();
-  const stableClassName = String(form.className || '').split(/\\s+/).filter((c) => /elementor-form|wpcf7|wpforms|forminator|fluent|gform/i.test(c)).sort();
+  const stableClassName = String(form.className || '').split(/\s+/).filter((c) => /elementor-form|wpcf7|wpforms|forminator|fluent|gform/i.test(c)).sort();
   const raw = JSON.stringify({ pageLanguage, popupId, id: form.id, stableClassName, action: form.action, hiddenIds, fieldShape });
   return sha1(raw);
 }`;
@@ -88,7 +89,7 @@ replaceRequired('stable form deduplication', oldFormSignature, newFormSignature)
 replaceRequired(
   'explicit URL list support',
   '  let urls = await discoverFromSitemaps();',
-  "  let urls = process.env.AUDIT_URLS\n    ? new Map(process.env.AUDIT_URLS.split(/[,\\r\\n]+/).map((u) => u.trim()).filter(Boolean).map((u) => [new URL(u, BASE_URL).href, { source: 'explicit-url-list' }]))\n    : await discoverFromSitemaps();",
+  "  let urls = process.env.AUDIT_URLS\n    ? new Map(process.env.AUDIT_URLS.split(/[,\r\n]+/).map((u) => u.trim()).filter(Boolean).map((u) => [new URL(u, BASE_URL).href, { source: 'explicit-url-list' }]))\n    : await discoverFromSitemaps();",
 );
 
 replaceRequired(
