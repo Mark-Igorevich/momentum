@@ -1,4 +1,4 @@
-name: SKILLDOCS targeted form inventory matrix
+name: SKILLDOCS full-site browser audit
 
 on:
   pull_request:
@@ -11,14 +11,14 @@ permissions:
   contents: read
 
 jobs:
-  targeted-inventory:
+  full-audit:
     strategy:
       fail-fast: true
       max-parallel: 1
       matrix:
-        attempt: [1, 2, 3, 4, 5, 6, 7, 8]
+        attempt: [1, 2, 3, 4]
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
       - name: Checkout audit branch
         uses: actions/checkout@v4
@@ -63,45 +63,28 @@ jobs:
           node skilldocs-audit/runtime-patch.mjs skilldocs-audit/audit.mjs skilldocs-audit/audit-runtime.mjs
           node --check skilldocs-audit/audit-runtime.mjs
 
-      - name: Inspect representative forms and popups without submission
+      - name: Run complete desktop and mobile audit with unique test submissions
         if: steps.probe.outputs.reachable == 'true'
         shell: pwsh
         env:
           BASE_URL: https://skilldocs.pl/
-          AUDIT_URLS: >-
-            https://skilldocs.pl/,
-            https://skilldocs.pl/uk/,
-            https://skilldocs.pl/en/,
-            https://skilldocs.pl/pl/,
-            https://skilldocs.pl/kontakty/,
-            https://skilldocs.pl/uk/kontakti/,
-            https://skilldocs.pl/en/contacts/,
-            https://skilldocs.pl/pl/kontakty-2/,
-            https://skilldocs.pl/o-kompanii/,
-            https://skilldocs.pl/uk/pro-kompaniyu/,
-            https://skilldocs.pl/en/about-company/,
-            https://skilldocs.pl/pl/o-firmie/,
-            https://skilldocs.pl/karta-pobyta/blue-card/,
-            https://skilldocs.pl/uk/karta-pobutu/blakitna-karta-blue-card/,
-            https://skilldocs.pl/en/residence-card/blue-card-2/,
-            https://skilldocs.pl/pl/karta-pobytu-pl/niebieska-karta-blue-card/,
-            https://skilldocs.pl/online-podacha-cherez-mos/,
-            https://skilldocs.pl/pl/zus-dla-jdg-w-polsce/
-          SUBMIT_FORMS: 'false'
+          OUTPUT_DIR: skilldocs-audit/output
+          SUBMIT_FORMS: 'true'
           TEST_PHONE: '+48570804478'
           TEST_EMAIL: contact@skilldocs.pl
-          MAX_URLS: '25'
-          MAX_FORM_SUBMISSIONS: '0'
-          PAGE_TIMEOUT_MS: '60000'
-          ACTION_TIMEOUT_MS: '9000'
-          AUDIT_ID: SD-TARGETED-FORM-INVENTORY-20260731
+          MAX_URLS: '750'
+          MAX_FORM_SUBMISSIONS: '100'
+          PAGE_TIMEOUT_MS: '45000'
+          ACTION_TIMEOUT_MS: '7000'
+          CURL_CONCURRENCY: '10'
+          AUDIT_ID: SD-FULL-SITE-AUDIT-20260731
         run: node skilldocs-audit/audit-runtime.mjs
 
-      - name: Upload targeted inventory
+      - name: Upload full audit result
         if: steps.probe.outputs.reachable == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: skilldocs-targeted-form-inventory-attempt-${{ matrix.attempt }}
+          name: skilldocs-full-site-audit-attempt-${{ matrix.attempt }}
           path: skilldocs-audit/output
           retention-days: 7
           if-no-files-found: warn
