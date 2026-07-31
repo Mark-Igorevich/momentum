@@ -1,4 +1,4 @@
-name: SKILLDOCS audit smoke matrix
+name: SKILLDOCS patched audit smoke matrix
 
 on:
   pull_request:
@@ -52,6 +52,13 @@ jobs:
           npm install --no-save playwright@1.55.0
           npx playwright install chromium
 
+      - name: Build patched audit runtime
+        if: steps.probe.outputs.reachable == 'true'
+        shell: pwsh
+        run: |
+          node skilldocs-audit/runtime-patch.mjs skilldocs-audit/audit.mjs skilldocs-audit/audit-runtime.mjs
+          node --check skilldocs-audit/audit-runtime.mjs
+
       - name: Run smoke audit
         if: steps.probe.outputs.reachable == 'true'
         shell: pwsh
@@ -64,14 +71,14 @@ jobs:
           MAX_FORM_SUBMISSIONS: '0'
           PAGE_TIMEOUT_MS: '45000'
           ACTION_TIMEOUT_MS: '9000'
-          AUDIT_ID: SD-AUDIT-SMOKE-20260731
-        run: node skilldocs-audit/audit.mjs
+          AUDIT_ID: SD-AUDIT-PATCHED-SMOKE-20260731
+        run: node skilldocs-audit/audit-runtime.mjs
 
       - name: Upload smoke report
         if: steps.probe.outputs.reachable == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: skilldocs-audit-smoke-attempt-${{ matrix.attempt }}
+          name: skilldocs-patched-smoke-attempt-${{ matrix.attempt }}
           path: skilldocs-audit/output
           retention-days: 7
           if-no-files-found: warn
