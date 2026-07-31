@@ -46,7 +46,7 @@ const newCandidateFunction = `function candidateShouldBeInteractionTested(candid
     candidate.onclick || candidate.dataAction || candidate.ariaControls || candidate.ariaExpanded !== '' ||
     /elementor-button|popup|sd-open|sd-native|menu-toggle|hamburger|accordion|tab|toggle|swiper|carousel/i.test(identity)
   );
-  if ((href === '#' || href === '#pll_switcher') && !hasExplicitControl) return false;
+  if (href.startsWith('#') && !hasExplicitControl) return false;
   if (href && !href.startsWith('#') && !href.startsWith('javascript:') && !href.includes('elementor-action')) return false;
   if (candidate.tag === 'a' && !href && !hasExplicitControl) return false;
   return true;
@@ -90,6 +90,12 @@ replaceRequired(
   'do not call raw DOM mutation a confirmed success',
   "    } else if ((after.mutations || 0) > 0) {\n      result.status = 'ok';\n      result.effect = `dom-mutated:${after.mutations}`;",
   "    } else if ((after.mutations || 0) > 0) {\n      result.status = 'ambiguous';\n      result.effect = `dom-mutated:${after.mutations}`;",
+);
+
+replaceRequired(
+  'mobile meaningful-controls coverage',
+  "    const selectedCandidates = exhaustiveInteractions\n      ? interactionCandidates\n      : interactionCandidates.filter((c) => /popup|elementor-action|menu|nav|accordion|tab|sd-open|popup-trigger/i.test(`${c.href} ${c.classes} ${c.dataAction}`) || Boolean(c.ariaControls) || Boolean(c.ariaExpanded)).slice(0, 16);",
+  "    const selectedCandidates = exhaustiveInteractions\n      ? interactionCandidates\n      : interactionCandidates.slice(0, 24);",
 );
 
 await fs.writeFile(outputPath, source, 'utf8');
