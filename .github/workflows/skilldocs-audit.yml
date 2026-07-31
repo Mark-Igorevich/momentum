@@ -1,4 +1,4 @@
-name: SKILLDOCS browser transport probe
+name: SKILLDOCS curl-routed browser probe
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ permissions:
 jobs:
   probe:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - name: Checkout audit branch
         uses: actions/checkout@v4
@@ -26,14 +26,14 @@ jobs:
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install chromium
-      - name: Run browser transport probe
+      - name: Run curl-routed browser probe
         shell: pwsh
-        run: node skilldocs-audit/probe.mjs
-      - name: Upload probe screenshots
+        run: node skilldocs-audit/probe-curl.mjs
+      - name: Upload probe screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: skilldocs-browser-probe-20260731
-          path: probe-*.png
+          name: skilldocs-curl-route-probe-20260731
+          path: probe-curl-route.png
           retention-days: 7
           if-no-files-found: warn
